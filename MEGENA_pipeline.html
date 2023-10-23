@@ -360,9 +360,10 @@ display: none;
 Won-Min Song’s 02/20/2020 vignette for MEGENA v1.3.6.</p>
 <div id="load-library-and-set-up-parameters" class="section level1">
 <h1>Load library and set up parameters</h1>
-<pre class="r"><code>library(MEGENA)
-n.cores &lt;- 2; # number of cores/threads to call for PCP
-doPar &lt;-TRUE; # do we want to parallelize?
+<pre class="r"><code>if(! require('MEGENA')) install.packages('MEGENA')
+library('MEGENA')
+n.cores = 2; # number of cores/threads to call for PCP
+doPar = TRUE; # do we want to parallelize?
 method = &quot;pearson&quot; # method for correlation. either pearson or spearman. 
 FDR.cutoff = 0.05 # FDR threshold to define significant correlations upon shuffling samples. 
 module.pval = 0.05 # module significance p-value. Recommended is 0.05. 

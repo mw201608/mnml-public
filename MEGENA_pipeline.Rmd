@@ -15,9 +15,10 @@ This pipeline is based on MEGENA v1.3.7 <https://CRAN.R-project.org/package=MEGE
 
 # Load library and set up parameters
 ```{r load_lib, message=FALSE}
-library(MEGENA)
-n.cores <- 2; # number of cores/threads to call for PCP
-doPar <-TRUE; # do we want to parallelize?
+if(! require('MEGENA')) install.packages('MEGENA')
+library('MEGENA')
+n.cores = 2; # number of cores/threads to call for PCP
+doPar = TRUE; # do we want to parallelize?
 method = "pearson" # method for correlation. either pearson or spearman. 
 FDR.cutoff = 0.05 # FDR threshold to define significant correlations upon shuffling samples. 
 module.pval = 0.05 # module significance p-value. Recommended is 0.05. 
