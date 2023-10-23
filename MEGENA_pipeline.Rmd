@@ -1,0 +1,154 @@
+---
+title: "MEGENA example pipeline"
+author: "Minghui Wang"
+date: "Oct 22, 2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This pipeline is based on MEGENA v1.3.7 <https://CRAN.R-project.org/package=MEGENA>, adapted from Won-Min Song's 02/20/2020 vignette for MEGENA v1.3.6.
+
+# Load library and set up parameters
+```{r load_lib, message=FALSE}
+library(MEGENA)
+n.cores <- 2; # number of cores/threads to call for PCP
+doPar <-TRUE; # do we want to parallelize?
+method = "pearson" # method for correlation. either pearson or spearman. 
+FDR.cutoff = 0.05 # FDR threshold to define significant correlations upon shuffling samples. 
+module.pval = 0.05 # module significance p-value. Recommended is 0.05. 
+hub.pval = 0.05 # connectivity significance p-value based random tetrahedral networks
+cor.perm = 10; # number of permutations for calculating FDRs for all correlation pairs. 
+hub.perm = 100; # number of permutations for calculating connectivity significance p-value. 
+```
+
+# Calculate pairwise correlations
+
+```{r correlation,message=FALSE}
+
+data(Sample_Expression) # load toy example data
+print(dim(datExpr))
+datExpr[1:5, 1:10] #check the first few rows and columns.
+# Optional gene annotation to be done on the downstream.
+annot.table = NULL #Should be a data.frame with at least two columns to map Ensembl gene ids to symbols. Will skip this step when NULL.
+id.col = 1
+symbol.col = 2
+###########
+
+rho.out = calculate.correlation(datExpr, doPerm = 10, FDR.cutoff = FDR.cutoff, method = method)
+```
+
+# Planar Filtered Network (PFN)
+In this step, Planar Filtered Network (PFN) is calculated by taking significant correlation pairs, ijw. In the case of utilizing a different similarity measure, one can independently format the results into 3-column data frame with column names c("row","col","weight"), and make sure the weight column ranges within 0 to 1. Using this as an input to calculate.PFN() will work just as fine. 
+
+```{r PFN}
+#### register multiple cores if needed: note that set.parallel.backend() is deprecated. 
+run.par = doPar & (getDoParWorkers() == 1) 
+if (run.par)
+{
+  cl <- parallel::makeCluster(n.cores)
+  registerDoParallel(cl)
+  # check how many workers are there
+  cat(paste("number of cores to use:",getDoParWorkers(),"\n",sep = ""))
+}
+
+##### Calculate PFN
+el <- calculate.PFN(rho.out, doPar = doPar, num.cores = n.cores, keep.track = FALSE)
+g <- graph.data.frame(el,directed = FALSE)
+```
+
+# Multi-scale clustering
+MCA clustering is performed to identify multiscale clustering analysis. "MEGENA.output"" is the core output to be used in the down-stream analyses for summarization and plotting.
+
+```{r MCA,results="hide",warning=FALSE}
+
+##### Perform MCA clustering.
+MEGENA.output <- do.MEGENA(g,
+ mod.pval = module.pval,hub.pval = hub.pval,remove.unsig = TRUE,
+ min.size = 10,max.size = vcount(g)/2,
+ doPar = doPar,num.cores = n.cores,n.perm = hub.perm,
+ save.output = FALSE)
+
+###### unregister cores as these are not needed anymore.
+if (getDoParWorkers() > 1)
+{
+  env <- foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
+
+```
+
+# Summarize results
+```{r summarize}
+summary.output <- MEGENA.ModuleSummary(MEGENA.output,
+	mod.pvalue = module.pval,hub.pvalue = hub.pval,
+	min.size = 10,max.size = vcount(g)/2,
+	annot.table = annot.table,id.col = id.col,symbol.col = symbol.col,
+	output.sig = TRUE)
+
+if (!is.null(annot.table))
+{
+  # update annotation to map to gene symbols
+  V(g)$name <- paste(annot.table[[symbol.col]][match(V(g)$name,annot.table[[id.col]])],V(g)$name,sep = "|")
+  summary.output <- output[c("mapped.modules","module.table")]
+  names(summary.output)[1] <- "modules"
+}
+
+print(head(summary.output$modules,2))
+print(summary.output$module.table)
+```
+Write the module results into files.
+```
+saveRDS(summary.output, file = 'summary.output.RDS')
+modules <- do.call(rbind, lapply(names(summary.output$modules), function(x) data.frame(Gene = summary.output$modules[[x]], Module = x, stringsAsFactors = FALSE)))
+write.table(modules, file = "module.dataframe.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(summary.output$module.table, file = "module.summary.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+```
+# Plot some modules
+
+You can generate refined module network plots: 
+
+```{r modulePlot}
+library(ggplot2)
+library(ggraph)
+
+pnet.obj <- plot_module(output.summary = summary.output, PFN = g,subset.module = "c1_3",
+	layout = "kamada.kawai",label.hubs.only = TRUE,
+	gene.set = NULL,color.code =  "grey",
+	output.plot = FALSE,out.dir = "modulePlot",col.names = c("magenta","green","cyan"),label.scaleFactor = 20,
+	hubLabel.col = "black",hubLabel.sizeProp = 1,show.topn.hubs = Inf,show.legend = TRUE)
+
+print(pnet.obj[[1]])
+```
+
+# Test gene ontology (GO)/pathway enrichment in modules
+There are quite a number of R packages available for performing GO/pathway enrichment analysis. For this tutorial, we will use my R package GOtest.
+
+First, install GOtest and its dependency msigdbi.
+```{r install_gotest, eval = FALSE}
+devtools::install_github("mw201608/msigdb")
+devtools::install_github("mw201608/GOtest")
+```
+Then, we run the enrichment analysis with the hypergeometic test (equivalent to Fisher's exact test) by calling the msigdb.gsea function.
+```{r GO_test}
+enr_table = GOtest:::msigdb.gsea(x = modules[, c('Gene', 'Module')], background = 'annotation', genesets = c('c2.cp', 'c5.go.bp', 'c5.go.cc', 'c5.go.mf'), name.x = 'Module', method = 'hypergeometric')
+head(enr_table, 5)
+enr_table <- enr_table[enr_table$P.adj <= 0.05, ]
+write.table(enr_table, file = "module.msgidb.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+# Plot module hierarchy
+We can visualize the module hierarchy as well as some optional module annotations by using a sunburst plot.
+```{r pressure, echo=FALSE, fig.cap = "Example sunburst plot.", out.width = '670px', out.height = '600px'}
+knitr::include_graphics("ex1.png")
+```
+To create a sunburst plot, you can check my Shiny app [https://github.com/mw201608/sunburst.shiny](https://github.com/mw201608/sunburst.shiny).
+
+# Save R session information.
+```{r sessionInfo}
+sessionInfo()
+```
