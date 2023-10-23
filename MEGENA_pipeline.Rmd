@@ -133,7 +133,7 @@ First, install GOtest and its dependency msigdbi.
 devtools::install_github("mw201608/msigdb")
 devtools::install_github("mw201608/GOtest")
 ```
-Then, we run the enrichment analysis with the hypergeometic test (equivalent to Fisher's exact test) by calling the msigdb.gsea function.
+Then, we run the enrichment analysis with the hypergeometric test (equivalent to Fisher's exact test) by calling the msigdb.gsea function.
 ```{r GO_test}
 enr_table = GOtest:::msigdb.gsea(x = modules[, c('Gene', 'Module')], background = 'annotation', genesets = c('c2.cp', 'c5.go.bp', 'c5.go.cc', 'c5.go.mf'), name.x = 'Module', method = 'hypergeometric')
 head(enr_table, 5)
